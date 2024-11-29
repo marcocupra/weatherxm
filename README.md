@@ -11,14 +11,6 @@ This is a custom integration for [Home Assistant](https://www.home-assistant.io/
 
 ## Installation
 
-### HACS (Recommended)
-1. Ensure you have [HACS](https://hacs.xyz/) installed in Home Assistant.
-2. Add this repository to HACS as a custom repository:
-   - Go to **HACS > Integrations**.
-   - Click the three dots in the top-right corner and select **Custom repositories**.
-   - Enter this repository's URL and set the category to `Integration`.
-3. Search for `WeatherXM` in HACS and install the integration.
-
 ### Manual Installation
 1. Download this repository as a ZIP file and extract it.
 2. Copy the `custom_components/weatherxm` folder to your Home Assistant configuration directory: `<config_directory>/custom_components/`.
