@@ -1,0 +1,12 @@
+{
+    "domain": "weatherxm",
+    "name": "WeatherXM",
+    "version": "1.0.0",
+    "documentation": "https://api.weatherxm.com/api/v1/docs/",
+    "dependencies": [],
+    "codeowners": ["@marcocupra"],
+    "requirements": ["aiohttp"],
+    "config_flow": true,
+    "iot_class": "cloud_polling",
+    "author": "marcocupra"
+}
