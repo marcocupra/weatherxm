@@ -2,18 +2,9 @@ import aiohttp
 import logging
 from datetime import timedelta
 
-# Import der Entity-Klasse
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.entity_registry import async_get
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    UnitOfTemperature,
-    UnitOfSpeed,
-    UnitOfIrradiance,
-    UnitOfPressure,
-    UnitOfPrecipitationDepth
-)
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,8 +21,7 @@ async def async_get_weatherxm_data(session, index, device_id):
             return None
 
 class WeatherXMSensor(Entity):
-    def __init__(self, hass, index, device_id, sensor_type, device_name, value, unit, icon):
-        self.hass = hass
+    def __init__(self, index, device_id, sensor_type, device_name, value, unit, icon):
         self.index = index
         self.device_id = device_id
         self.sensor_type = sensor_type
@@ -57,14 +47,8 @@ class WeatherXMSensor(Entity):
             "feels_like": "Gefühlte Temperatur"
         }
 
-        # Debug-Ausgabe, um zu überprüfen, welcher Sensortyp übergeben wird
-        _LOGGER.debug(f"Sensor-Typ: {sensor_type}")
-
         # Der "friendly_name" zeigt nur die deutsche Übersetzung des Sensortyps an
         self._friendly_name = translations.get(sensor_type, sensor_type)
-
-        # Log-Ausgabe des friendly_name
-        _LOGGER.debug(f"Friendly Name für Sensor '{self._entity_name}': {self._friendly_name}")
 
     @property
     def name(self):
@@ -92,7 +76,7 @@ class WeatherXMSensor(Entity):
         """Informationen über das Gerät, dem der Sensor zugeordnet ist."""
         return {
             "identifiers": {(f"weatherxm_{self.index}_{self.device_id}")},  # Eindeutige Geräte-ID
-            "name": "WeatherXM Wetterstation",  # Name des Geräts (z.B. Wetterstation)
+            "name": "WeatherXM Wetterstation",  # Name des Geräts
             "manufacturer": "WeatherXM",
             "model": "WeatherXM Station",
             "sw_version": "1.0",
@@ -102,10 +86,11 @@ class WeatherXMSensor(Entity):
     def extra_state_attributes(self):
         """Gibt zusätzliche Attribute zurück, einschließlich friendly_name."""
         return {
-            "friendly_name": self._friendly_name  # Der "friendly_name" zeigt nur den Sensortyp an
+            "friendly_name": self._friendly_name
         }
 
     async def async_update(self):
+        """Ruft die aktuellen Daten von der API ab und aktualisiert den Zustand."""
         session = aiohttp.ClientSession()
         data = await async_get_weatherxm_data(session, self.index, self.device_id)
         await session.close()
@@ -114,7 +99,6 @@ class WeatherXMSensor(Entity):
             self._state = data["current_weather"].get(self.sensor_type)
             _LOGGER.debug(f"Updated {self._entity_name}: {self._state}")
 
-# Die async_setup_entry Methode, die von Home Assistant aufgerufen wird, um die Sensoren zu registrieren
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
     """Set up WeatherXM sensors based on a config entry."""
     _LOGGER.debug(f"Start setup for entry: {entry}")
@@ -129,42 +113,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _LOGGER.error("Keine Daten erhalten, Sensoren werden nicht hinzugefügt.")
         return
 
-    device_name = data.get("name", f"{index}-{device_id}")  # Stationname aus API-Daten extrahieren
+    device_name = data.get("name", f"{index}-{device_id}")
 
-    entity_registry = async_get(hass)
-    existing_entities = {entry.unique_id for entry in entity_registry.entities.values()}
-
-    sensors = []
     sensor_types = [
-        ("temperature", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
+        ("temperature", "°C", "mdi:thermometer"),
         ("humidity", "%", "mdi:water-percent"),
-        ("wind_speed", UnitOfSpeed.METERS_PER_SECOND, "mdi:weather-windy"),
-        ("wind_gust", UnitOfSpeed.METERS_PER_SECOND, "mdi:weather-windy"),
+        ("wind_speed", "m/s", "mdi:weather-windy"),
+        ("wind_gust", "m/s", "mdi:weather-windy"),
         ("wind_direction", "°", "mdi:compass"),
-        ("solar_irradiance", UnitOfIrradiance.WATTS_PER_SQUARE_METER, "mdi:weather-sunny"),
+        ("solar_irradiance", "W/m²", "mdi:weather-sunny"),
         ("uv_index", None, "mdi:weather-sunny-alert"),
         ("precipitation", "mm/h", "mdi:weather-rainy"),
-        ("precipitation_accumulated", UnitOfPrecipitationDepth.MILLIMETERS, "mdi:weather-rainy"),
-        ("pressure", UnitOfPressure.HPA, "mdi:gauge"),
-        ("dew_point", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
-        ("feels_like", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
+        ("precipitation_accumulated", "mm", "mdi:weather-rainy"),
+        ("pressure", "hPa", "mdi:gauge"),
+        ("dew_point", "°C", "mdi:thermometer"),
+        ("feels_like", "°C", "mdi:thermometer"),
     ]
 
-    for sensor_type, unit, icon in sensor_types:
-        unique_id = f"{index}_{device_id}_{sensor_type}"
-        if unique_id not in existing_entities:
-            sensor = WeatherXMSensor(
-                hass, index, device_id, sensor_type, device_name,  # Übergabe des Stationsnamens
-                data["current_weather"].get(sensor_type), unit, icon
-            )
-            sensors.append(sensor)
-            _LOGGER.debug(f"Prepared sensor {sensor.name} for registration")
-        else:
-            _LOGGER.debug(f"Sensor {sensor_type} bereits registriert, wird nicht erneut hinzugefügt.")
+    sensors = [
+        WeatherXMSensor(
+            index, device_id, sensor_type, device_name,
+            data["current_weather"].get(sensor_type), unit, icon
+        )
+        for sensor_type, unit, icon in sensor_types
+    ]
 
-    if sensors:
-        _LOGGER.debug(f"Registering {len(sensors)} sensors for device {device_name}.")
-        async_add_entities(sensors, update_before_add=True)
+    async_add_entities(sensors, update_before_add=True)
 
     # Register update interval
     async def update_sensors(event_time):
