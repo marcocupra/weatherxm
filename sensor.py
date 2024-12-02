@@ -1,149 +1,118 @@
-import aiohttp
 import logging
-from datetime import timedelta
 
+from .const import DOMAIN, SENSOR_TYPES
+
+from homeassistant.helpers.device_registry import DeviceEntryType
 from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.const import (
-    UnitOfTemperature,
-    UnitOfSpeed,
-    UnitOfIrradiance,
-    UnitOfPressure,
-    UnitOfPrecipitationDepth
-)
+from homeassistant.const import UnitOfTemperature, UnitOfPressure, UnitOfSpeed
+
 
 _LOGGER = logging.getLogger(__name__)
 
-UPDATE_INTERVAL = timedelta(minutes=5)
+def clean_device_id(device_id):
+    """Clean device ID to make it stable."""
+    return device_id.replace(" ", "_").lower()
 
-def clean_device_id(name):
-    """Bereinige den Stationsnamen, entferne Sonderzeichen und Leerzeichen."""
-    return re.sub(r'\W+', '_', name).lower()
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up WeatherXM sensors from a config entry."""
+    _LOGGER.debug(f"Setting up WeatherXM sensors for entry: {entry.unique_id}")
 
+    api_client = hass.data[DOMAIN].get("api_client")
+    if not api_client:
+        _LOGGER.error("API client not initialized")
+        return
 
-async def async_get_weatherxm_data(session, index, device_id):
-    url = f"https://api.weatherxm.com/api/v1/cells/{index}/devices/{device_id}"
-    async with session.get(url) as response:
-        if response.status == 200:
-            return await response.json()
-        else:
-            _LOGGER.error(f"Failed to fetch data from WeatherXM API, status code: {response.status}")
-            return None
+    device_id = clean_device_id(f"{entry.data['deviceId']}_{entry.data['index']}")
+    device_name = entry.data["name"]
+
+    sensors = []
+    for sensor_type in SENSOR_TYPES:
+        sensors.append(
+            WeatherXMSensor(
+                device_id=device_id,
+                device_name=device_name,
+                sensor_type=sensor_type,
+                unique_id=f"{device_id}_{sensor_type}",
+                api_client=api_client,
+            )
+        )
+    async_add_entities(sensors, update_before_add=True)
+
 
 class WeatherXMSensor(Entity):
-    def __init__(self, index, device_id, sensor_type, device_name, value, unit, icon):
-        self.index = index
-        self.device_id = clean_device_id(device_name)
+    """Representation of a WeatherXM sensor."""
+
+    def __init__(self, device_id, device_name, sensor_type, unique_id, api_client):
+        """Initialize the sensor."""
+        self.device_id = device_id
+        self.device_name = device_name
         self.sensor_type = sensor_type
-        self._entity_name = f"{device_name}_{sensor_type}"
-        self._state = value
-        self._unit_of_measurement = unit
-        self._icon = icon
-        self._unique_id = f"{index}_{device_id}_{sensor_type}"
-        translations = {
-            "temperature": "Temperatur",
-            "humidity": "Luftfeuchtigkeit",
-            "wind_speed": "Windgeschwindigkeit",
-            "wind_gust": "Windböen",
-            "wind_direction": "Windrichtung",
-            "solar_irradiance": "Sonnenstrahlung",
-            "uv_index": "UV-Index",
-            "precipitation": "Niederschlag",
-            "precipitation_accumulated": "Niederschlagsmenge",
-            "pressure": "Luftdruck",
-            "dew_point": "Taupunkt",
-            "feels_like": "Gefühlte Temperatur"
-        }
-        self._friendly_name = translations.get(sensor_type, sensor_type)
-
-    @property
-    def name(self):
-        """Gibt den Entitätsnamen zurück."""
-        return self._entity_name  # Entitätsname im Format stationname_sensortyp
-
-    @property
-    def state(self):
-        return self._state
-
-    @property
-    def unit_of_measurement(self):
-        return self._unit_of_measurement
-
-    @property
-    def icon(self):
-        return self._icon
+        self._unique_id = unique_id
+        self.api_client = api_client
+        self._state = None
+        self._attributes = {}
 
     @property
     def unique_id(self):
+        """Return the unique ID for the sensor."""
         return self._unique_id
 
     @property
     def device_info(self):
-        """Informationen über das Gerät, dem der Sensor zugeordnet ist."""
+        """Return device information."""
         return {
-            "identifiers": {(f"weatherxm_{self.device_id}")},
-            "name": f"{self.device_name}",
+            "identifiers": {(DOMAIN, self.device_id)},
+            "name": self.device_name,
             "manufacturer": "WeatherXM",
-            "model": "WeatherXM Station",
-            "sw_version": "1.0",
+            "model": "Weather Station",
+            "entry_type": DeviceEntryType.SERVICE,  # DeviceEntryType korrekt verwendet
         }
 
+    @property
+    def name(self):
+        """Return the name of the sensor."""
+        sensor_info = SENSOR_TYPES.get(self.sensor_type, {})
+        return f"{self.device_name} {sensor_info.get('description', self.sensor_type)}"
+
+    @property
+    def state(self):
+        """Return the state of the sensor."""
+        return self._state
+
+    @property
+    def extra_state_attributes(self):
+        """Return additional state attributes."""
+        return self._attributes
+
+    @property
+    def unit_of_measurement(self):
+        """Return the unit of measurement of this entity."""
+        return SENSOR_TYPES[self.sensor_type]["unit"]
+
+    @property
+    def icon(self):
+        """Return the icon of the sensor."""
+        return SENSOR_TYPES[self.sensor_type]["icon"]
+
     async def async_update(self):
-        """Ruft die aktuellen Daten von der API ab und aktualisiert den Zustand."""
-        session = aiohttp.ClientSession()
-        data = await async_get_weatherxm_data(session, self.index, self.device_id)
-        await session.close()
-
-        if data:
-            self._state = data["current_weather"].get(self.sensor_type)
-            _LOGGER.debug(f"Updated {self._entity_name}: {self._state}")
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
-    """Set up WeatherXM sensors based on a config entry."""
-    _LOGGER.debug(f"Start setup for entry: {entry}")
-    index = entry.data["index"]
-    device_id = entry.data["deviceId"]
-
-    session = aiohttp.ClientSession()
-    data = await async_get_weatherxm_data(session, index, device_id)
-    await session.close()
-
-    if not data:
-        _LOGGER.error("Keine Daten erhalten, Sensoren werden nicht hinzugefügt.")
-        return
-
-    device_name = data.get("name", f"{index}-{device_id}")
-
-    sensor_types = [
-        ("temperature", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
-        ("humidity", "%", "mdi:water-percent"),
-        ("wind_speed", UnitOfSpeed.METERS_PER_SECOND, "mdi:weather-windy"),
-        ("wind_gust", UnitOfSpeed.METERS_PER_SECOND, "mdi:weather-windy"),
-        ("wind_direction", "°", "mdi:compass"),
-        ("solar_irradiance", UnitOfIrradiance.WATTS_PER_SQUARE_METER, "mdi:weather-sunny"),
-        ("uv_index", None, "mdi:weather-sunny-alert"),
-        ("precipitation", "mm/h", "mdi:weather-rainy"),
-        ("precipitation_accumulated", UnitOfPrecipitationDepth.MILLIMETERS, "mdi:weather-rainy"),
-        ("pressure", UnitOfPressure.HPA, "mdi:gauge"),
-        ("dew_point", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
-        ("feels_like", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
-    ]
-
-    sensors = [
-        WeatherXMSensor(
-            index, device_id, sensor_type, device_name,
-            data["current_weather"].get(sensor_type), unit, icon
-        )
-        for sensor_type, unit, icon in sensor_types
-    ]
-
-    async_add_entities(sensors, update_before_add=True)
-
-    async def update_sensors(event_time):
-        for sensor in sensors:
-            await sensor.async_update()
-            sensor.async_write_ha_state()
-
-    async_track_time_interval(hass, update_sensors, UPDATE_INTERVAL)
+        """Fetch new state data for the sensor."""
+        try:
+            data = await self.api_client.get_sensor_data(self.device_id.split("_")[1], self.device_id.split("_")[0])
+            if data and "current_weather" in data:
+                weather_data = data["current_weather"]
+                sensor_value = weather_data.get(self.sensor_type)
+                
+                if sensor_value is not None:
+                    self._state = sensor_value
+                    self._attributes = {
+                        "unit": SENSOR_TYPES[self.sensor_type]["unit"],
+                        "description": SENSOR_TYPES[self.sensor_type]["description"],
+                        "last_updated": weather_data.get("timestamp"),
+                    }
+                    _LOGGER.debug(f"Updated {self.name}: {self._state} {self._attributes}")
+                else:
+                    _LOGGER.error(f"Sensor type {self.sensor_type} not found in current_weather data")
+            else:
+                _LOGGER.error(f"No valid data returned for {self.name}")
+        except Exception as e:
+            _LOGGER.error(f"Failed to update sensor {self.name}: {e}")
