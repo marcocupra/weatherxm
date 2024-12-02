@@ -6,10 +6,22 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.const import (
+    UnitOfTemperature,
+    UnitOfSpeed,
+    UnitOfIrradiance,
+    UnitOfPressure,
+    UnitOfPrecipitationDepth
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 UPDATE_INTERVAL = timedelta(minutes=5)
+
+def clean_device_id(name):
+    """Bereinige den Stationsnamen, entferne Sonderzeichen und Leerzeichen."""
+    return re.sub(r'\W+', '_', name).lower()
+
 
 async def async_get_weatherxm_data(session, index, device_id):
     url = f"https://api.weatherxm.com/api/v1/cells/{index}/devices/{device_id}"
@@ -23,15 +35,13 @@ async def async_get_weatherxm_data(session, index, device_id):
 class WeatherXMSensor(Entity):
     def __init__(self, index, device_id, sensor_type, device_name, value, unit, icon):
         self.index = index
-        self.device_id = device_id
+        self.device_id = clean_device_id(device_name)
         self.sensor_type = sensor_type
-        self._entity_name = f"{device_name}_{sensor_type}"  # Entitäts-ID im Format stationname_sensortyp
+        self._entity_name = f"{device_name}_{sensor_type}"
         self._state = value
         self._unit_of_measurement = unit
         self._icon = icon
         self._unique_id = f"{index}_{device_id}_{sensor_type}"
-
-        # Deutsche Übersetzungen für die Sensor-Typen (für friendly_name)
         translations = {
             "temperature": "Temperatur",
             "humidity": "Luftfeuchtigkeit",
@@ -46,8 +56,6 @@ class WeatherXMSensor(Entity):
             "dew_point": "Taupunkt",
             "feels_like": "Gefühlte Temperatur"
         }
-
-        # Der "friendly_name" zeigt nur die deutsche Übersetzung des Sensortyps an
         self._friendly_name = translations.get(sensor_type, sensor_type)
 
     @property
@@ -75,18 +83,11 @@ class WeatherXMSensor(Entity):
     def device_info(self):
         """Informationen über das Gerät, dem der Sensor zugeordnet ist."""
         return {
-            "identifiers": {(f"weatherxm_{self.index}_{self.device_id}")},  # Eindeutige Geräte-ID
-            "name": "WeatherXM Wetterstation",  # Name des Geräts
+            "identifiers": {(f"weatherxm_{self.device_id}")},
+            "name": f"{self.device_name}",
             "manufacturer": "WeatherXM",
             "model": "WeatherXM Station",
             "sw_version": "1.0",
-        }
-
-    @property
-    def extra_state_attributes(self):
-        """Gibt zusätzliche Attribute zurück, einschließlich friendly_name."""
-        return {
-            "friendly_name": self._friendly_name
         }
 
     async def async_update(self):
@@ -116,18 +117,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     device_name = data.get("name", f"{index}-{device_id}")
 
     sensor_types = [
-        ("temperature", "°C", "mdi:thermometer"),
+        ("temperature", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
         ("humidity", "%", "mdi:water-percent"),
-        ("wind_speed", "m/s", "mdi:weather-windy"),
-        ("wind_gust", "m/s", "mdi:weather-windy"),
+        ("wind_speed", UnitOfSpeed.METERS_PER_SECOND, "mdi:weather-windy"),
+        ("wind_gust", UnitOfSpeed.METERS_PER_SECOND, "mdi:weather-windy"),
         ("wind_direction", "°", "mdi:compass"),
-        ("solar_irradiance", "W/m²", "mdi:weather-sunny"),
+        ("solar_irradiance", UnitOfIrradiance.WATTS_PER_SQUARE_METER, "mdi:weather-sunny"),
         ("uv_index", None, "mdi:weather-sunny-alert"),
         ("precipitation", "mm/h", "mdi:weather-rainy"),
-        ("precipitation_accumulated", "mm", "mdi:weather-rainy"),
-        ("pressure", "hPa", "mdi:gauge"),
-        ("dew_point", "°C", "mdi:thermometer"),
-        ("feels_like", "°C", "mdi:thermometer"),
+        ("precipitation_accumulated", UnitOfPrecipitationDepth.MILLIMETERS, "mdi:weather-rainy"),
+        ("pressure", UnitOfPressure.HPA, "mdi:gauge"),
+        ("dew_point", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
+        ("feels_like", UnitOfTemperature.CELSIUS, "mdi:thermometer"),
     ]
 
     sensors = [
@@ -140,7 +141,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async_add_entities(sensors, update_before_add=True)
 
-    # Register update interval
     async def update_sensors(event_time):
         for sensor in sensors:
             await sensor.async_update()
